@@ -1,5 +1,5 @@
 # TikTok Bio Check Service für deine FlutterFlow App
-# app.py
+# tiktok.py mit Proxy-Support
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -28,11 +28,24 @@ def get_random_headers():
         'Cache-Control': 'max-age=0',
     }
 
+def get_working_proxy():
+    """Gibt eine Liste kostenloser Proxies zurück (zum Testen)"""
+    # Diese Proxies sind oft instabil, aber gut zum Testen
+    free_proxies = [
+        # HTTP Proxies (oft funktionieren nur wenige)
+        {'http': 'http://103.149.162.194:80', 'https': 'http://103.149.162.194:80'},
+        {'http': 'http://47.74.152.29:8888', 'https': 'http://47.74.152.29:8888'},
+        {'http': 'http://134.195.101.26:1080', 'https': 'http://134.195.101.26:1080'},
+        {'http': 'http://103.155.54.185:83', 'https': 'http://103.155.54.185:83'},
+        {'http': 'http://103.155.54.233:83', 'https': 'http://103.155.54.233:83'},
+    ]
+    return random.choice(free_proxies)
+
 app = Flask(__name__)
 CORS(app)  # Erlaubt Requests von FlutterFlow
 
 def get_tiktok_bio(username):
-    """Extrahiert die Bio von einem TikTok-Profil mit allen Methoden aus dem Original-Script"""
+    """Extrahiert die Bio von einem TikTok-Profil mit Proxy-Support"""
     
     # @ entfernen falls vorhanden
     if username.startswith('@'):
@@ -40,84 +53,108 @@ def get_tiktok_bio(username):
     
     url = f"https://www.tiktok.com/@{username}"
     
-    # HIER IST DIE ÄNDERUNG: Verwende die random headers statt feste
+    # Zufällige Headers verwenden
     headers = get_random_headers()
     
-    # Random delay hinzufügen
+    # Random delay um weniger verdächtig zu sein
     time.sleep(random.uniform(0.5, 2.0))
     
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            html_content = response.text
+    # Mehrere Versuche: erst ohne Proxy, dann mit verschiedenen Proxies
+    attempts = [
+        None,  # Kein Proxy (erster Versuch)
+        get_working_proxy(),  # Proxy 1
+        get_working_proxy(),  # Proxy 2
+        get_working_proxy(),  # Proxy 3
+    ]
+    
+    for attempt_num, proxy in enumerate(attempts, 1):
+        try:
+            print(f"Attempt {attempt_num}: {'Direct' if proxy is None else f'Proxy {proxy}'}")
             
-            # ALLE Bio-Extraction-Methoden aus dem Original-Script verwenden
+            response = requests.get(
+                url, 
+                headers=headers, 
+                proxies=proxy,
+                timeout=15,
+                verify=False  # Ignore SSL für manche Proxies
+            )
             
-            # Methode 1: Standard signature pattern
-            signature_pattern = r'"signature":"(.*?)"'
-            match = re.search(signature_pattern, html_content)
-            if match:
-                bio = match.group(1)
-                bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
-                if bio and bio != "No signature found":
-                    print(f"Bio found via signature pattern: {bio[:50]}...")
-                    return bio
-            
-            # Methode 2: Webapp user-detail pattern
-            webapp_pattern = r'"webapp\.user-detail":\{"userInfo":\{"user":\{[^}]*"signature":"(.*?)"'
-            match = re.search(webapp_pattern, html_content)
-            if match:
-                bio = match.group(1)
-                bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
-                if bio:
-                    print(f"Bio found via webapp pattern: {bio[:50]}...")
-                    return bio
-            
-            # Methode 3: UserModule pattern (aus SIGI_STATE)
-            user_module_pattern = r'"UserModule":\{[^}]*"users":\{[^}]*"signature":"(.*?)"'
-            match = re.search(user_module_pattern, html_content)
-            if match:
-                bio = match.group(1)
-                bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
-                if bio:
-                    print(f"Bio found via UserModule pattern: {bio[:50]}...")
-                    return bio
-            
-            # Methode 4: Direkte JSON-Suche nach uniqueId und signature
-            uniqueid_pattern = rf'"uniqueId":"{re.escape(username)}"[^}}]*"signature":"(.*?)"'
-            match = re.search(uniqueid_pattern, html_content, re.IGNORECASE)
-            if match:
-                bio = match.group(1)
-                bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
-                if bio:
-                    print(f"Bio found via uniqueId pattern: {bio[:50]}...")
-                    return bio
-            
-            # Methode 5: Allgemeine Suche in JSON-Strukturen
-            all_signatures = re.findall(r'"signature":"(.*?)"', html_content)
-            for sig in all_signatures:
-                if sig and sig != "" and len(sig) > 5:  # Filter leere/kurze Signatures
-                    bio = sig.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
-                    print(f"Bio found via general search: {bio[:50]}...")
-                    return bio
-            
-            print("No bio found with any pattern")
-            return None
+            if response.status_code == 200:
+                html_content = response.text
                 
-        elif response.status_code == 404:
-            print(f"TikTok user @{username} not found")
-            return None
-        elif response.status_code == 403:
-            print("TikTok blocked request (403)")
-            return None
-        else:
-            print(f"HTTP Error: {response.status_code}")
-            return None
-            
-    except Exception as e:
-        print(f"Error fetching TikTok profile: {e}")
-        return None
+                # Bio-Extraction-Methoden
+                
+                # Methode 1: Standard signature pattern
+                signature_pattern = r'"signature":"(.*?)"'
+                match = re.search(signature_pattern, html_content)
+                if match:
+                    bio = match.group(1)
+                    bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                    if bio and bio != "No signature found":
+                        print(f"Bio found via signature pattern: {bio[:50]}...")
+                        print(f"Success with: {'Direct connection' if proxy is None else f'Proxy {proxy}'}")
+                        return bio
+                
+                # Methode 2: Webapp user-detail pattern
+                webapp_pattern = r'"webapp\.user-detail":\{"userInfo":\{"user":\{[^}]*"signature":"(.*?)"'
+                match = re.search(webapp_pattern, html_content)
+                if match:
+                    bio = match.group(1)
+                    bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                    if bio:
+                        print(f"Bio found via webapp pattern: {bio[:50]}...")
+                        print(f"Success with: {'Direct connection' if proxy is None else f'Proxy {proxy}'}")
+                        return bio
+                
+                # Methode 3: UserModule pattern
+                user_module_pattern = r'"UserModule":\{[^}]*"users":\{[^}]*"signature":"(.*?)"'
+                match = re.search(user_module_pattern, html_content)
+                if match:
+                    bio = match.group(1)
+                    bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                    if bio:
+                        print(f"Bio found via UserModule pattern: {bio[:50]}...")
+                        print(f"Success with: {'Direct connection' if proxy is None else f'Proxy {proxy}'}")
+                        return bio
+                
+                # Methode 4: Direkte JSON-Suche nach uniqueId
+                uniqueid_pattern = rf'"uniqueId":"{re.escape(username)}"[^}}]*"signature":"(.*?)"'
+                match = re.search(uniqueid_pattern, html_content, re.IGNORECASE)
+                if match:
+                    bio = match.group(1)
+                    bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                    if bio:
+                        print(f"Bio found via uniqueId pattern: {bio[:50]}...")
+                        print(f"Success with: {'Direct connection' if proxy is None else f'Proxy {proxy}'}")
+                        return bio
+                
+                # Methode 5: Allgemeine Suche
+                all_signatures = re.findall(r'"signature":"(.*?)"', html_content)
+                for sig in all_signatures:
+                    if sig and sig != "" and len(sig) > 5:
+                        bio = sig.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                        print(f"Bio found via general search: {bio[:50]}...")
+                        print(f"Success with: {'Direct connection' if proxy is None else f'Proxy {proxy}'}")
+                        return bio
+                
+                print(f"No bio found with attempt {attempt_num}")
+                    
+            elif response.status_code == 404:
+                print(f"TikTok user @{username} not found")
+                return None
+            elif response.status_code == 403:
+                print(f"TikTok blocked request (403) - attempt {attempt_num}")
+                continue  # Try next proxy
+            else:
+                print(f"HTTP Error {response.status_code} - attempt {attempt_num}")
+                continue
+                
+        except Exception as e:
+            print(f"Error with attempt {attempt_num}: {e}")
+            continue  # Try next proxy
+    
+    print("All proxy attempts failed")
+    return None
 
 @app.route('/check-bio', methods=['POST'])
 def check_bio():
