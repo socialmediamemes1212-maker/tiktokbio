@@ -1,2 +1,3 @@
-web: gunicorn tiktok:app
+web: gunicorn TikTok:app
+
 
