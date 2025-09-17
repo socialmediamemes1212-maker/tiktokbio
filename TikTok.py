@@ -1,0 +1,184 @@
+# TikTok Bio Check Service für deine FlutterFlow App
+# app.py
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import requests
+import re
+import time
+
+app = Flask(__name__)
+CORS(app)  # Erlaubt Requests von FlutterFlow
+
+def get_tiktok_bio(username):
+    """Extrahiert die Bio von einem TikTok-Profil mit allen Methoden aus dem Original-Script"""
+    
+    # @ entfernen falls vorhanden
+    if username.startswith('@'):
+        username = username[1:]
+    
+    url = f"https://www.tiktok.com/@{username}"
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0',
+    }
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            html_content = response.text
+            
+            # ALLE Bio-Extraction-Methoden aus dem Original-Script verwenden
+            
+            # Methode 1: Standard signature pattern
+            signature_pattern = r'"signature":"(.*?)"'
+            match = re.search(signature_pattern, html_content)
+            if match:
+                bio = match.group(1)
+                bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                if bio and bio != "No signature found":
+                    print(f"Bio found via signature pattern: {bio[:50]}...")
+                    return bio
+            
+            # Methode 2: Webapp user-detail pattern
+            webapp_pattern = r'"webapp\.user-detail":\{"userInfo":\{"user":\{[^}]*"signature":"(.*?)"'
+            match = re.search(webapp_pattern, html_content)
+            if match:
+                bio = match.group(1)
+                bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                if bio:
+                    print(f"Bio found via webapp pattern: {bio[:50]}...")
+                    return bio
+            
+            # Methode 3: UserModule pattern (aus SIGI_STATE)
+            user_module_pattern = r'"UserModule":\{[^}]*"users":\{[^}]*"signature":"(.*?)"'
+            match = re.search(user_module_pattern, html_content)
+            if match:
+                bio = match.group(1)
+                bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                if bio:
+                    print(f"Bio found via UserModule pattern: {bio[:50]}...")
+                    return bio
+            
+            # Methode 4: Direkte JSON-Suche nach uniqueId und signature
+            uniqueid_pattern = rf'"uniqueId":"{re.escape(username)}"[^}}]*"signature":"(.*?)"'
+            match = re.search(uniqueid_pattern, html_content, re.IGNORECASE)
+            if match:
+                bio = match.group(1)
+                bio = bio.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                if bio:
+                    print(f"Bio found via uniqueId pattern: {bio[:50]}...")
+                    return bio
+            
+            # Methode 5: Allgemeine Suche in JSON-Strukturen
+            all_signatures = re.findall(r'"signature":"(.*?)"', html_content)
+            for sig in all_signatures:
+                if sig and sig != "" and len(sig) > 5:  # Filter leere/kurze Signatures
+                    bio = sig.replace('\\n', '\n').replace('\\/', '/').replace('\\"', '"')
+                    print(f"Bio found via general search: {bio[:50]}...")
+                    return bio
+            
+            print("No bio found with any pattern")
+            return None
+                
+        elif response.status_code == 404:
+            print(f"TikTok user @{username} not found")
+            return None
+        elif response.status_code == 403:
+            print("TikTok blocked request (403)")
+            return None
+        else:
+            print(f"HTTP Error: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        print(f"Error fetching TikTok profile: {e}")
+        return None
+
+@app.route('/check-bio', methods=['POST'])
+def check_bio():
+    """API Endpoint für Bio-Check"""
+    
+    try:
+        data = request.json
+        username = data.get('username', '').strip()
+        code = data.get('code', '').strip()
+        
+        if not username or not code:
+            return jsonify({
+                'success': False,
+                'error': 'Username and code are required'
+            }), 400
+        
+        print(f"Checking bio for @{username} with code: {code}")
+        
+        # TikTok Bio abrufen
+        bio = get_tiktok_bio(username)
+        
+        if bio is None:
+            return jsonify({
+                'success': False,
+                'error': 'Could not fetch TikTok profile or bio not found',
+                'username': username
+            }), 404
+        
+        # Code in Bio suchen (case-insensitive)
+        found = code.lower() in bio.lower()
+        
+        print(f"Bio: {bio[:100]}...")
+        print(f"Code '{code}' {'FOUND' if found else 'NOT FOUND'}")
+        
+        return jsonify({
+            'success': True,
+            'found': found,
+            'username': username,
+            'code': code,
+            'bio_preview': bio[:200] + '...' if len(bio) > 200 else bio,
+            'timestamp': time.time()
+        })
+        
+    except Exception as e:
+        print(f"API Error: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Internal server error'
+        }), 500
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({'status': 'healthy', 'service': 'tiktok-bio-checker'})
+
+@app.route('/', methods=['GET'])
+def index():
+    """Info page"""
+    return jsonify({
+        'service': 'TikTok Bio Checker API',
+        'version': '1.0.0',
+        'endpoints': {
+            'POST /check-bio': 'Check if code exists in TikTok bio',
+            'GET /health': 'Health check'
+        },
+        'usage': {
+            'url': '/check-bio',
+            'method': 'POST',
+            'body': {
+                'username': 'tiktok_username',
+                'code': 'verification_code'
+            }
+        }
+    })
+
+if __name__ == '__main__':
+    # Für lokales Testen
+    app.run(debug=True, host='0.0.0.0', port=5000)
