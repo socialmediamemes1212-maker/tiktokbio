@@ -8,8 +8,6 @@ import re
 import time
 import random
 
-
-
 def get_random_headers():
     user_agents = [
         'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
@@ -30,9 +28,6 @@ def get_random_headers():
         'Cache-Control': 'max-age=0',
     }
 
-
-
-
 app = Flask(__name__)
 CORS(app)  # Erlaubt Requests von FlutterFlow
 
@@ -45,18 +40,11 @@ def get_tiktok_bio(username):
     
     url = f"https://www.tiktok.com/@{username}"
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9,de;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Cache-Control': 'max-age=0',
-    }
+    # HIER IST DIE ÄNDERUNG: Verwende die random headers statt feste
+    headers = get_random_headers()
+    
+    # Random delay hinzufügen
+    time.sleep(random.uniform(0.5, 2.0))
     
     try:
         response = requests.get(url, headers=headers, timeout=15)
